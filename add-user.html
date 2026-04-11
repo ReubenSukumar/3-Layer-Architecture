@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Registry Intake</title>
+  <link rel="stylesheet" href="add-user.css" />
+</head>
+<body>
+  <div class="background-grid"></div>
+
+  <main class="intake-page">
+    <section class="intake-panel">
+      <p class="eyebrow">Continental Registry</p>
+      <h1 class="title">Add User</h1>
+      <p class="subtitle">
+        Register a new profile with coordinates and an excommunicado timestamp.
+        Each submission is stored in the database and becomes available in both active views.
+      </p>
+
+      <form id="userForm" class="intake-form">
+        <label class="field">
+          <span>Name</span>
+          <input id="name" name="name" type="text" placeholder="John Wick" required />
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Latitude</span>
+            <input
+              id="latitude"
+              name="latitude"
+              type="number"
+              step="0.0001"
+              min="-90"
+              max="90"
+              placeholder="40.7128"
+              required
+            />
+          </label>
+
+          <label class="field">
+            <span>Longitude</span>
+            <input
+              id="longitude"
+              name="longitude"
+              type="number"
+              step="0.0001"
+              min="-180"
+              max="180"
+              placeholder="-74.0060"
+              required
+            />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Excommunicado Date</span>
+          <input id="excommunicadoAt" name="excommunicadoAt" type="datetime-local" required />
+        </label>
+
+        <button type="submit" class="submit-btn">Save User</button>
+        <p id="formMessage" class="form-message" aria-live="polite"></p>
+      </form>
+
+      <div class="quick-links">
+        <a href="index.html" class="ghost-link">Return to Continental</a>
+        <a href="excommunicado.html" class="ghost-link">Open Excommunicado</a>
+        <a href="location.html" class="ghost-link">Open Location</a>
+      </div>
+    </section>
+
+    <aside class="registry-panel">
+      <div class="panel-header">
+        <p class="panel-label">Database Feed</p>
+        <h2>Registered Users</h2>
+      </div>
+      <div id="registryList" class="registry-list"></div>
+    </aside>
+  </main>
+
+  <script src="add-user.js"></script>
+</body>
+</html>

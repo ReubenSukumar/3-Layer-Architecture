@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The High Table</title>
+  <link rel="stylesheet" href="high-table.css" />
+</head>
+<body>
+  <div class="background-overlay"></div>
+
+  <main class="high-table-page">
+    <section class="left-panel">
+      <p class="eyebrow">CLASSIFIED ACCESS</p>
+      <h1 class="title">THE HIGH TABLE</h1>
+      <p class="subtitle">
+        Select a sanctioned destination. Globe focus, place name, latitude,
+        and longitude will update in real time.
+      </p>
+
+      <div class="location-grid">
+        <button class="location-card active" data-location="rome">ROME</button>
+        <button class="location-card" data-location="tokyo">TOKYO</button>
+        <button class="location-card" data-location="paris">PARIS</button>
+        <button class="location-card" data-location="newyork">NEW YORK</button>
+        <button class="location-card" data-location="london">LONDON</button>
+        <button class="location-card" data-location="dubai">DUBAI</button>
+      </div>
+
+      <div class="info-panel">
+        <div class="info-row">
+          <span class="label">Place</span>
+          <span class="value" id="place">Rome</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Latitude</span>
+          <span class="value" id="latitude">41.9028</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Longitude</span>
+          <span class="value" id="longitude">12.4964</span>
+        </div>
+      </div>
+
+      <a class="back-link btn-return" href="index.html">Return to Continental</a>
+    </section>
+
+    <section class="right-panel">
+      <div id="globeViz"></div>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/three"></script>
+  <script src="https://unpkg.com/globe.gl"></script>
+  <script src="high-table.js"></script>
+</body>
+</html>

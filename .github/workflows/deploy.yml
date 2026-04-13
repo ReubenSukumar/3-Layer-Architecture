@@ -1,0 +1,93 @@
+name: Deploy 3-Tier App (Bastion)
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'main'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------
+      # Checkout Code
+      # ------------------------
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      # ------------------------
+      # Build Backend
+      # ------------------------
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Build JAR
+        run: |
+          cd backend
+          mvn clean package -DskipTests
+
+      # ------------------------
+      # Archive Frontend
+      # ------------------------
+      - name: Archive frontend
+        run: |
+          tar -czf frontend.tar.gz index.html add-user.html excommunicado.html location.html *.css *.js assets/
+
+      # ------------------------
+      # Setup SSH
+      # ------------------------
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          ssh-keyscan -H ${{ secrets.BASTION_HOST }} >> ~/.ssh/known_hosts
+
+      # ------------------------
+      # Deploy Frontend (Bastion → Frontend EC2)
+      # ------------------------
+      - name: Deploy frontend via Bastion
+        run: |
+          scp frontend.tar.gz ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/frontend.tar.gz
+
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} << EOF
+            scp -o StrictHostKeyChecking=no /tmp/frontend.tar.gz ${{ secrets.EC2_USER }}@${{ secrets.FRONTEND_HOST }}:/tmp/frontend.tar.gz
+
+            ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.FRONTEND_HOST }} << 'INNER_EOF'
+              sudo rm -rf /var/www/html/*
+              sudo mkdir -p /var/www/html
+              sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html
+              sudo systemctl restart nginx
+            INNER_EOF
+          EOF
+
+      # ------------------------
+      # Deploy Backend via Bastion
+      # ------------------------
+      - name: Deploy backend via Bastion
+        run: |
+          scp backend/target/*.jar ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/app.jar
+
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} << EOF
+            scp -o StrictHostKeyChecking=no /tmp/app.jar ${{ secrets.EC2_USER }}@${{ secrets.BACKEND_HOST }}:/tmp/app.jar
+
+            ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.BACKEND_HOST }} << 'INNER_EOF'
+              sudo mkdir -p /opt/jw-registry
+              sudo mv /tmp/app.jar /opt/jw-registry/app.jar
+              sudo chown -R ec2-user:ec2-user /opt/jw-registry
+
+              sudo systemctl daemon-reload
+              sudo systemctl restart jw-registry
+              sudo systemctl status jw-registry --no-pager
+            INNER_EOF
+          EOF

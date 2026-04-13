@@ -43,14 +43,22 @@ jobs:
           tar -czf frontend.tar.gz index.html add-user.html excommunicado.html location.html *.css *.js assets/
 
       # ------------------------
-      # Setup SSH
+      # Setup SSH (FIXED)
       # ------------------------
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+
+          # Proper private key formatting
+          printf "%s\n" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.BASTION_HOST }} >> ~/.ssh/known_hosts
+
+          # Start SSH agent and add key
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/id_rsa
+
+          # Avoid failure if host not reachable
+          ssh-keyscan -H ${{ secrets.BASTION_HOST }} >> ~/.ssh/known_hosts || true
 
       # ------------------------
       # Deploy Frontend (ALL INSTANCES)
@@ -59,21 +67,21 @@ jobs:
         run: |
           IFS=',' read -ra HOSTS <<< "${{ secrets.FRONTEND_HOSTS }}"
 
-          scp frontend.tar.gz ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/frontend.tar.gz
+          # Copy to bastion first
+          scp -o StrictHostKeyChecking=no frontend.tar.gz ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/frontend.tar.gz
 
           for HOST in "${HOSTS[@]}"; do
             echo "Deploying to Frontend: $HOST"
 
-            ssh ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} << EOF
-              scp -o StrictHostKeyChecking=no /tmp/frontend.tar.gz ${{ secrets.EC2_USER }}@$HOST:/tmp/frontend.tar.gz
-
-              ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@$HOST << 'INNER_EOF'
+            ssh -A -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} "
+              scp -o StrictHostKeyChecking=no /tmp/frontend.tar.gz ${{ secrets.EC2_USER }}@$HOST:/tmp/frontend.tar.gz &&
+              ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@$HOST '
                 sudo rm -rf /var/www/html/*
                 sudo mkdir -p /var/www/html
                 sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html
                 sudo systemctl restart nginx
-              INNER_EOF
-            EOF
+              '
+            "
           done
 
       # ------------------------
@@ -83,15 +91,15 @@ jobs:
         run: |
           IFS=',' read -ra HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"
 
-          scp backend/target/*.jar ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/app.jar
+          # Copy JAR to bastion
+          scp -o StrictHostKeyChecking=no backend/target/*.jar ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/app.jar
 
           for HOST in "${HOSTS[@]}"; do
             echo "Deploying to Backend: $HOST"
 
-            ssh ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} << EOF
-              scp -o StrictHostKeyChecking=no /tmp/app.jar ${{ secrets.EC2_USER }}@$HOST:/tmp/app.jar
-
-              ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@$HOST << 'INNER_EOF'
+            ssh -A -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} "
+              scp -o StrictHostKeyChecking=no /tmp/app.jar ${{ secrets.EC2_USER }}@$HOST:/tmp/app.jar &&
+              ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@$HOST '
                 sudo mkdir -p /opt/jw-registry
                 sudo mv /tmp/app.jar /opt/jw-registry/app.jar
                 sudo chown -R ec2-user:ec2-user /opt/jw-registry
@@ -99,6 +107,6 @@ jobs:
                 sudo systemctl daemon-reload
                 sudo systemctl restart jw-registry
                 sudo systemctl status jw-registry --no-pager
-              INNER_EOF
-            EOF
+              '
+            "
           done

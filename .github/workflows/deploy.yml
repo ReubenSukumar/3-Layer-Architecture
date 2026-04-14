@@ -4,157 +4,114 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch to deploy'
+        description: Branch to deploy
         required: true
-        default: 'main'
+        default: main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # ------------------------
-      # Checkout Code
-      # ------------------------
       - name: Checkout selected branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.branch }}
 
-      # ------------------------
-      # Build Backend (ONLY ONCE)
-      # ------------------------
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '21'
+          distribution: temurin
+          java-version: "21"
+          cache: maven
 
       - name: Build JAR
         run: |
           cd backend
           mvn clean package -DskipTests
 
-      # ------------------------
-      # Archive Frontend
-      # ------------------------
       - name: Archive frontend
         run: |
-          tar -czf frontend.tar.gz index.html add-user.html excommunicado.html location.html *.css *.js assets/
+          tar -czf frontend.tar.gz \
+            index.html add-user.html excommunicado.html location.html \
+            *.css *.js assets
 
-      # ------------------------
-      # Setup SSH
-      # ------------------------
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           printf "%s\n" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.BASTION_HOST }} >> ~/.ssh/known_hosts || true
+          cat > ~/.ssh/config <<EOF
+          Host bastion
+            HostName ${{ secrets.BASTION_HOST }}
+            User ${{ secrets.EC2_USER }}
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+            UserKnownHostsFile=/dev/null
 
-      # ------------------------
-      # Deploy Frontend
-      # ------------------------
-      - name: Deploy frontend to all instances
-        run: |
-          IFS=',' read -ra HOSTS <<< "${{ secrets.FRONTEND_HOSTS }}"
+          Host *
+            User ${{ secrets.EC2_USER }}
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+            UserKnownHostsFile=/dev/null
+          EOF
+          chmod 600 ~/.ssh/config
 
-          scp -o StrictHostKeyChecking=no frontend.tar.gz ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/frontend.tar.gz
-          scp -o StrictHostKeyChecking=no ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/id_rsa
-
-          for HOST in "${HOSTS[@]}"; do
-            echo "Deploying to Frontend: $HOST"
-
-            ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} "
-              chmod 600 /tmp/id_rsa
-
-              scp -i /tmp/id_rsa -o StrictHostKeyChecking=no /tmp/frontend.tar.gz ${{ secrets.EC2_USER }}@$HOST:/tmp/frontend.tar.gz &&
-
-              ssh -i /tmp/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@$HOST '
-                sudo rm -rf /var/www/html/*
-                sudo mkdir -p /var/www/html
-                sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html
-                sudo systemctl restart nginx
-              '
-            "
-          done
-
-      # ------------------------
-      # Verify JAR
-      # ------------------------
       - name: Verify JAR exists
         run: |
           ls -lh backend/target/
+          test -f backend/target/app.jar
 
-      # ------------------------
-      # Deploy Backend
-      # ------------------------
-      - name: Deploy backend to all instances
+      - name: Deploy frontend to all instances
         run: |
-          set -e
+          set -euo pipefail
 
-          JAR_FILE=$(ls backend/target/*.jar | head -n 1)
-          echo "Using JAR: $JAR_FILE"
+          IFS=',' read -r -a FRONTEND_HOSTS <<< "${{ secrets.FRONTEND_HOSTS }}"
 
-          IFS=',' read -ra HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"
+          for HOST in "${FRONTEND_HOSTS[@]}"; do
+            HOST="$(echo "$HOST" | xargs)"
+            echo "Deploying frontend to $HOST"
 
-          scp -o StrictHostKeyChecking=no "$JAR_FILE" ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/app.jar
-          scp -o StrictHostKeyChecking=no ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/id_rsa
+            scp -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+              frontend.tar.gz \
+              ${{ secrets.EC2_USER }}@"$HOST":/tmp/frontend.tar.gz
 
-          for HOST in "${HOSTS[@]}"; do
-            echo "=============================="
-            echo "Deploying to Backend: $HOST"
-            echo "=============================="
-
-            ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} "
-              set -e
-
-              chmod 600 /tmp/id_rsa
-
-              echo 'Copying JAR to backend...'
-              scp -i /tmp/id_rsa -o StrictHostKeyChecking=no /tmp/app.jar ${{ secrets.EC2_USER }}@$HOST:/tmp/app.jar
-
-              echo 'Deploying on backend instance...'
-              ssh -i /tmp/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@$HOST '
-                set -e
-
-                sudo apt update
-                sudo apt install openjdk-17-jdk -y
-
-                if [ ! -f /etc/jw-registry/jw-registry.env ]; then
-                  echo "ENV file missing!"
-                  exit 1
-                fi
-
-                sudo mkdir -p /opt/jw-registry
-                sudo mv /tmp/app.jar /opt/jw-registry/app.jar
-
-                sudo chown -R ubuntu:ubuntu /opt/jw-registry
-                sudo chmod +x /opt/jw-registry/app.jar
-
-                sudo systemctl daemon-reload
-                sudo systemctl restart jw-registry
-
-                sleep 5
-
-                sudo systemctl status jw-registry --no-pager || true
-                
-                
-                sudo systemctl daemon-reload
-                sudo systemctl restart jw-registry
-
-                echo "Waiting for application to start..."
-
-              i=1
-          while [ $i -le 15 ]; do
-          if curl -f http://localhost:8080/api/health; then
-          echo "Application is UP!"
-          exit 0
-          fi
-          echo "Retrying... ($i)"
-          sleep 3
-          i=$((i+1))
+            ssh -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+              ${{ secrets.EC2_USER }}@"$HOST" \
+              "sudo mkdir -p /var/www/html && \
+               sudo find /var/www/html -mindepth 1 -maxdepth 1 -exec rm -rf {} + && \
+               sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html && \
+               sudo systemctl restart nginx"
           done
 
-          echo "Application failed to start!" 
-          exit 1
+      - name: Deploy backend to all instances
+        run: |
+          set -euo pipefail
+
+          IFS=',' read -r -a BACKEND_HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"
+
+          for HOST in "${BACKEND_HOSTS[@]}"; do
+            HOST="$(echo "$HOST" | xargs)"
+            echo "Deploying backend to $HOST"
+
+            scp -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+              backend/target/app.jar \
+              ${{ secrets.EC2_USER }}@"$HOST":/tmp/app.jar
+
+            ssh -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+              ${{ secrets.EC2_USER }}@"$HOST" \
+              "sudo mkdir -p /opt/jw-registry && \
+               sudo mv /tmp/app.jar /opt/jw-registry/app.jar && \
+               sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /opt/jw-registry && \
+               sudo systemctl daemon-reload && \
+               sudo systemctl restart jw-registry && \
+               sudo systemctl is-active --quiet jw-registry"
+
+            ssh -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+              ${{ secrets.EC2_USER }}@"$HOST" \
+              "for i in \$(seq 1 15); do \
+                 curl -fsS http://localhost:8080/health && exit 0; \
+                 sleep 3; \
+               done; \
+               exit 1"
+          done

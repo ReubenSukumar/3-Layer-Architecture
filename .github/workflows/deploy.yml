@@ -129,7 +129,7 @@ jobs:
                 sudo mkdir -p /opt/jw-registry
                 sudo mv /tmp/app.jar /opt/jw-registry/app.jar
 
-                sudo chown -R $USER:$USER /opt/jw-registry
+                sudo chown -R ubuntu:ubuntu /opt/jw-registry
                 sudo chmod +x /opt/jw-registry/app.jar
 
                 sudo systemctl daemon-reload

@@ -102,7 +102,7 @@ jobs:
               ssh -i /tmp/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@$HOST '
                 sudo mkdir -p /opt/jw-registry
                 sudo mv /tmp/app.jar /opt/jw-registry/app.jar
-                sudo chown -R ec2-user:ec2-user /opt/jw-registry
+                sudo chown -R ubuntu:ubuntu /opt/jw-registry
 
                 sudo systemctl daemon-reload
                 sudo systemctl restart jw-registry

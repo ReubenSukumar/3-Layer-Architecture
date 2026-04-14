@@ -22,7 +22,7 @@ jobs:
           ref: ${{ github.event.inputs.branch }}
 
       # ------------------------
-      # Build Backend
+      # Build Backend (ONLY ONCE)
       # ------------------------
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -53,13 +53,12 @@ jobs:
           ssh-keyscan -H ${{ secrets.BASTION_HOST }} >> ~/.ssh/known_hosts || true
 
       # ------------------------
-      # Deploy Frontend (ALL INSTANCES)
+      # Deploy Frontend
       # ------------------------
       - name: Deploy frontend to all instances
         run: |
           IFS=',' read -ra HOSTS <<< "${{ secrets.FRONTEND_HOSTS }}"
 
-          # Copy files + key to bastion
           scp -o StrictHostKeyChecking=no frontend.tar.gz ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/frontend.tar.gz
           scp -o StrictHostKeyChecking=no ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/id_rsa
 
@@ -81,73 +80,65 @@ jobs:
           done
 
       # ------------------------
-      # Deploy Backend (ALL INSTANCES)
+      # Verify JAR
       # ------------------------
-      - name: Build Backend JAR
-        run: |
-            cd backend
-            mvn clean package -DskipTests
-
       - name: Verify JAR exists
         run: |
-            ls -lh backend/target/
+          ls -lh backend/target/
 
+      # ------------------------
+      # Deploy Backend
+      # ------------------------
       - name: Deploy backend to all instances
         run: |
-            set -e
+          set -e
 
-            # Get JAR file safely
-            JAR_FILE=$(ls backend/target/*.jar | head -n 1)
-            echo "Using JAR: $JAR_FILE"
+          JAR_FILE=$(ls backend/target/*.jar | head -n 1)
+          echo "Using JAR: $JAR_FILE"
 
-            IFS=',' read -ra HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"
+          IFS=',' read -ra HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"
 
-            # Copy JAR + key to bastion
-            scp -o StrictHostKeyChecking=no "$JAR_FILE" ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/app.jar
-            scp -o StrictHostKeyChecking=no ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/id_rsa
+          scp -o StrictHostKeyChecking=no "$JAR_FILE" ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/app.jar
+          scp -o StrictHostKeyChecking=no ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }}:/tmp/id_rsa
 
-            for HOST in "${HOSTS[@]}"; do
-              echo "=============================="
-              echo "Deploying to Backend: $HOST"
-              echo "=============================="
+          for HOST in "${HOSTS[@]}"; do
+            echo "=============================="
+            echo "Deploying to Backend: $HOST"
+            echo "=============================="
 
-              ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} "
+            ssh -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} "
+              set -e
+
+              chmod 600 /tmp/id_rsa
+
+              echo 'Copying JAR to backend...'
+              scp -i /tmp/id_rsa -o StrictHostKeyChecking=no /tmp/app.jar ${{ secrets.EC2_USER }}@$HOST:/tmp/app.jar
+
+              echo 'Deploying on backend instance...'
+              ssh -i /tmp/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@$HOST '
                 set -e
 
-                chmod 600 /tmp/id_rsa
+                sudo apt update
+                sudo apt install openjdk-17-jdk -y
 
-                echo 'Copying JAR to backend...'
-                scp -i /tmp/id_rsa -o StrictHostKeyChecking=no /tmp/app.jar ${{ secrets.EC2_USER }}@$HOST:/tmp/app.jar
+                if [ ! -f /etc/jw-registry/jw-registry.env ]; then
+                  echo "ENV file missing!"
+                  exit 1
+                fi
 
-                echo 'Deploying on backend instance...'
-                ssh -i /tmp/id_rsa -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@$HOST '
-                  set -e
+                sudo mkdir -p /opt/jw-registry
+                sudo mv /tmp/app.jar /opt/jw-registry/app.jar
 
-                  echo \"Checking JAR...\"
-                  if [ ! -f /tmp/app.jar ]; then
-                    echo \"JAR not found! Aborting...\"
-                    exit 1
-                  fi
+                sudo chown -R $USER:$USER /opt/jw-registry
+                sudo chmod +x /opt/jw-registry/app.jar
 
-                  echo \"Creating directory...\"
-                  sudo mkdir -p /opt/jw-registry
+                sudo systemctl daemon-reload
+                sudo systemctl restart jw-registry
 
-                  echo \"Moving JAR...\"
-                  sudo mv /tmp/app.jar /opt/jw-registry/app.jar
+                sleep 5
 
-                  echo \"Setting permissions...\"
-                  sudo chown -R ubuntu:ubuntu /opt/jw-registry
-                  sudo chmod +x /opt/jw-registry/app.jar
-
-                  echo \"Validating JAR...\"
-                  file /opt/jw-registry/app.jar
-
-                  echo \"Restarting service...\"
-                  sudo systemctl daemon-reload
-                  sudo systemctl restart jw-registry
-
-                  echo \"Service status:\"
-                  sudo systemctl status jw-registry --no-pager || true
-                '
-              "
-            done
+                sudo systemctl status jw-registry --no-pager || true
+                curl -f http://localhost:8080/api/health || exit 1
+              '
+            "
+          done

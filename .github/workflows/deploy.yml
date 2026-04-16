@@ -84,40 +84,8 @@ jobs:
                sudo systemctl restart nginx"
           done
 
+
       - name: Deploy backend to all instances
-        run: |
-          set -euo pipefail
-
-          IFS=',' read -r -a BACKEND_HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"
-
-          for HOST in "${BACKEND_HOSTS[@]}"; do
-            HOST="$(echo "$HOST" | xargs)"
-            echo "Deploying backend to $HOST"
-
-            scp -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
-              backend/target/app.jar \
-              ${{ secrets.EC2_USER }}@"$HOST":/tmp/app.jar
-
-            ssh -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
-              ${{ secrets.EC2_USER }}@"$HOST" \
-              "sudo mkdir -p /opt/jw-registry && \
-               sudo mv /tmp/app.jar /opt/jw-registry/app.jar && \
-               sudo chown -R ${{ secrets.EC2_USER }}:${{ secrets.EC2_USER }} /opt/jw-registry && \
-               sudo systemctl daemon-reload && \
-               sudo systemctl restart jw-registry && \
-               sudo systemctl is-active --quiet jw-registry"
-
-            ssh -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
-              ${{ secrets.EC2_USER }}@"$HOST" \
-              "for i in \$(seq 1 15); do \
-                 curl -fsS http://localhost:8080/health && exit 0; \
-                 sleep 3; \
-               done; \
-               exit 1"
-          done
-
-
-      - name: Deploy backend
         run: |
           set -euo pipefail
           IFS=',' read -r -a HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"

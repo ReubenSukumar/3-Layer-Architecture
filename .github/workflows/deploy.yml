@@ -12,6 +12,20 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    env:
+      SERVER_PORT: "8080"
+      JPA_DDL_AUTO: "update"
+      DB_MAX_POOL_SIZE: "10"
+      DB_MIN_IDLE: "2"
+      APP_CORS_ALLOWED_ORIGINS: ${{ secrets.APP_CORS_ALLOWED_ORIGINS }}
+      SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
+      SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
+      SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_ADMIN_USER: ${{ secrets.DB_ADMIN_USER }}
+      DB_ADMIN_PASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
+      APP_DB_NAME: "jw_registry"
+
     steps:
       - name: Checkout selected branch
         uses: actions/checkout@v4
@@ -41,6 +55,7 @@ jobs:
           mkdir -p ~/.ssh
           printf "%s\n" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+
           cat > ~/.ssh/config <<EOF
           Host bastion
             HostName ${{ secrets.BASTION_HOST }}
@@ -55,12 +70,29 @@ jobs:
             StrictHostKeyChecking no
             UserKnownHostsFile=/dev/null
           EOF
+
           chmod 600 ~/.ssh/config
 
       - name: Verify JAR exists
         run: |
           ls -lh backend/target/
           test -f backend/target/app.jar
+
+      - name: Bootstrap MySQL database
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y mysql-client
+
+          mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASSWORD" <<SQL
+          CREATE DATABASE IF NOT EXISTS ${APP_DB_NAME}
+            CHARACTER SET utf8mb4
+            COLLATE utf8mb4_unicode_ci;
+
+          CREATE USER IF NOT EXISTS '${SPRING_DATASOURCE_USERNAME}'@'%' IDENTIFIED BY '${SPRING_DATASOURCE_PASSWORD}';
+          GRANT ALL PRIVILEGES ON ${APP_DB_NAME}.* TO '${SPRING_DATASOURCE_USERNAME}'@'%';
+          FLUSH PRIVILEGES;
+          SQL
 
       - name: Deploy frontend to all instances
         run: |
@@ -87,75 +119,56 @@ jobs:
       - name: Deploy backend to all instances
         run: |
           set -euo pipefail
-          IFS=',' read -r -a HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"
 
-          for HOST in "${HOSTS[@]}"; do
+          JAR_FILE="$(ls backend/target/*.jar | head -n 1)"
+          IFS=',' read -r -a BACKEND_HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"
+
+          for HOST in "${BACKEND_HOSTS[@]}"; do
             HOST="$(echo "$HOST" | xargs)"
             echo "Deploying backend to $HOST"
 
-            scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
-              -J ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
-              backend/target/app.jar \
+            cat > /tmp/jw-registry.env <<EOF
+            SERVER_PORT=8080
+            SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
+            SPRING_DATASOURCE_USERNAME=${SPRING_DATASOURCE_USERNAME}
+            SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD}
+            JPA_DDL_AUTO=${JPA_DDL_AUTO}
+            APP_CORS_ALLOWED_ORIGINS=${APP_CORS_ALLOWED_ORIGINS}
+            DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
+            DB_MIN_IDLE=${DB_MIN_IDLE}
+            EOF
+
+            scp -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+              "$JAR_FILE" \
               ${{ secrets.EC2_USER }}@"$HOST":/tmp/app.jar
 
-            ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no \
-              -J ${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
-              ${{ secrets.EC2_USER }}@"$HOST" <<EOF
-          set -e
+            scp -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+              /tmp/jw-registry.env \
+              ${{ secrets.EC2_USER }}@"$HOST":/tmp/jw-registry.env
 
-          sudo apt-get update
-          sudo apt-get install -y openjdk-21-jre-headless
-
-          sudo mkdir -p /opt/jw-registry
-          sudo mkdir -p /etc/jw-registry
-
-          sudo mv /tmp/app.jar /opt/jw-registry/app.jar
-          sudo chown -R ubuntu:ubuntu /opt/jw-registry
-
-          cat <<ENVEOF | sudo tee /etc/jw-registry/jw-registry.env >/dev/null
-          SERVER_PORT=8080
-          SPRING_DATASOURCE_URL=${{ secrets.SPRING_DATASOURCE_URL }}
-          SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DATASOURCE_USERNAME }}
-          SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DATASOURCE_PASSWORD }}
-          JPA_DDL_AUTO=update
-          APP_CORS_ALLOWED_ORIGINS=${{ secrets.APP_CORS_ALLOWED_ORIGINS }}
-          DB_MAX_POOL_SIZE=10
-          DB_MIN_IDLE=2
-          ENVEOF
-
-          cat <<SERVICEEOF | sudo tee /etc/systemd/system/jw-registry.service >/dev/null
-          [Unit]
-          Description=JW Registry Spring Boot API
-          After=network.target
-
-          [Service]
-          Type=simple
-          User=ubuntu
-          Group=ubuntu
-          WorkingDirectory=/opt/jw-registry
-          EnvironmentFile=/etc/jw-registry/jw-registry.env
-          ExecStart=/usr/bin/java -jar /opt/jw-registry/app.jar
-          SuccessExitStatus=143
-          Restart=always
-          RestartSec=5
-
-          [Install]
-          WantedBy=multi-user.target
-          SERVICEEOF
-
-          sudo chmod 600 /etc/jw-registry/jw-registry.env
-          sudo systemctl daemon-reload
-          sudo systemctl enable jw-registry
-          sudo systemctl restart jw-registry
-
-          for i in \$(seq 1 20); do
-            if curl -fsS http://localhost:8080/health; then
-              exit 0
-            fi
-            sleep 3
-          done
-
-          sudo journalctl -u jw-registry --no-pager -n 100
-          exit 1
-          EOF
+            ssh -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+              ${{ secrets.EC2_USER }}@"$HOST" \
+              "set -e; \
+               sudo apt-get update; \
+               sudo apt-get install -y openjdk-21-jre-headless; \
+               sudo mkdir -p /opt/jw-registry /etc/jw-registry; \
+               sudo mv /tmp/app.jar /opt/jw-registry/app.jar; \
+               sudo mv /tmp/jw-registry.env /etc/jw-registry/jw-registry.env; \
+               sudo chown -R ubuntu:ubuntu /opt/jw-registry; \
+               sudo chown root:root /etc/jw-registry/jw-registry.env; \
+               sudo chmod 600 /etc/jw-registry/jw-registry.env; \
+               sudo systemctl daemon-reload; \
+               sudo systemctl enable jw-registry; \
+               sudo systemctl restart jw-registry; \
+               for i in \$(seq 1 20); do \
+                 if systemctl is-active --quiet jw-registry; then break; fi; \
+                 sleep 3; \
+               done; \
+               sudo systemctl is-active --quiet jw-registry; \
+               for i in \$(seq 1 20); do \
+                 if curl -fsS http://localhost:8080/health; then exit 0; fi; \
+                 sleep 3; \
+               done; \
+               sudo journalctl -u jw-registry --no-pager -n 100; \
+               exit 1"
           done

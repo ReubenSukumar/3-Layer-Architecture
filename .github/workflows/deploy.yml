@@ -118,6 +118,23 @@ jobs:
               "set -e; sudo mkdir -p /var/www/html /etc/nginx/conf.d; sudo find /var/www/html -mindepth 1 -maxdepth 1 -exec rm -rf {} +; sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html; sudo mv /tmp/jw-frontend.conf /etc/nginx/conf.d/jw-frontend.conf; sudo nginx -t; sudo systemctl reload nginx"
           done
 
+      - name: Smoke test frontend proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a HOSTS <<< "${FRONTEND_HOSTS}"
+
+          for HOST in "${HOSTS[@]}"; do
+            HOST="$(echo "$HOST" | xargs)"
+            [ -n "$HOST" ] || continue
+            echo "Checking API proxy on $HOST"
+
+            ssh -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
+              "${EC2_USER}@${HOST}" \
+              "set -e; curl -fsS http://localhost/api/users >/tmp/api-users.json; test -s /tmp/api-users.json"
+          done
+
+
       - name: Deploy backend
         shell: bash
         run: |

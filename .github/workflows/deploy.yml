@@ -118,22 +118,6 @@ jobs:
               "set -e; sudo mkdir -p /var/www/html /etc/nginx/conf.d; sudo find /var/www/html -mindepth 1 -maxdepth 1 -exec rm -rf {} +; sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html; sudo mv /tmp/jw-frontend.conf /etc/nginx/conf.d/jw-frontend.conf; sudo nginx -t && (sudo systemctl is-active --quiet nginx \ && sudo systemctl reload nginx \ || sudo systemctl start nginx)"  
           done
 
-      - name: Smoke test frontend proxy
-        shell: bash
-        run: |
-          set -euo pipefail
-          IFS=',' read -r -a HOSTS <<< "${FRONTEND_HOSTS}"
-
-          for HOST in "${HOSTS[@]}"; do
-            HOST="$(echo "$HOST" | xargs)"
-            [ -n "$HOST" ] || continue
-            echo "Checking API proxy on $HOST"
-
-            ssh -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
-              "${EC2_USER}@${HOST}" \
-              "set -e; curl -fsS http://localhost/api/users >/tmp/api-users.json; test -s /tmp/api-users.json"
-          done
-
 
       - name: Deploy backend
         shell: bash
@@ -173,4 +157,20 @@ jobs:
             ssh -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
               "${EC2_USER}@${HOST}" \
               "set -e; sudo apt-get -o DPkg::Lock::Timeout=120 update; sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y openjdk-21-jre-headless; sudo mkdir -p /opt/jw-registry /etc/jw-registry /etc/systemd/system; sudo mv /tmp/app.jar /opt/jw-registry/app.jar; sudo mv /tmp/jw-registry.env /etc/jw-registry/jw-registry.env; sudo mv /tmp/jw-registry.service /etc/systemd/system/jw-registry.service; sudo chown -R ubuntu:ubuntu /opt/jw-registry; sudo chown root:root /etc/jw-registry/jw-registry.env /etc/systemd/system/jw-registry.service; sudo chmod 600 /etc/jw-registry/jw-registry.env; sudo chmod 644 /etc/systemd/system/jw-registry.service; sudo systemctl daemon-reload; sudo systemctl enable jw-registry; sudo systemctl restart jw-registry; for i in \$(seq 1 20); do if systemctl is-active --quiet jw-registry; then break; fi; sleep 3; done; sudo systemctl is-active --quiet jw-registry; for i in \$(seq 1 20); do if curl -fsS http://localhost:8080/health; then exit 0; fi; sleep 3; done; sudo journalctl -u jw-registry --no-pager -n 100; exit 1"
+          done
+
+      - name: Smoke test frontend proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a HOSTS <<< "${FRONTEND_HOSTS}"
+
+          for HOST in "${HOSTS[@]}"; do
+            HOST="$(echo "$HOST" | xargs)"
+            [ -n "$HOST" ] || continue
+            echo "Checking API proxy on $HOST"
+
+            ssh -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
+              "${EC2_USER}@${HOST}" \
+              "set -e; curl -fsS http://localhost/api/users >/tmp/api-users.json; test -s /tmp/api-users.json"
           done

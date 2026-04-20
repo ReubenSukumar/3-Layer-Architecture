@@ -57,19 +57,13 @@ function renderUserList() {
   userListEl.innerHTML = users
     .map(
       (user) => `
-        <button class="user-card ${user.id === selectedUserId ? "active" : ""}" data-user-id="${user.id}">
+        <button type="button" class="user-card ${user.id === selectedUserId ? "active" : ""}" data-user-id="${user.id}">
           <span class="user-card__name">${escapeHtml(user.name)}</span>
           <span class="user-card__date">${escapeHtml(formatDate(user.excommunicadoAt))}</span>
         </button>
       `
     )
     .join("");
-
-  document.querySelectorAll(".user-card").forEach((button) => {
-    button.addEventListener("click", () => {
-      selectUser(Number(button.dataset.userId));
-    });
-  });
 }
 
 function updateCountdown(user) {
@@ -148,5 +142,16 @@ async function loadUsers() {
     setTimerDisplay(0, 0, 0, 0);
   }
 }
+
+userListEl.addEventListener("click", (event) => {
+  const button = event.target.closest(".user-card");
+
+  if (!button || !userListEl.contains(button)) {
+    return;
+  }
+
+  event.preventDefault();
+  selectUser(Number(button.dataset.userId));
+});
 
 loadUsers();

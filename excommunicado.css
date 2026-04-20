@@ -394,6 +394,8 @@ color:#ff2b2b;
 position:fixed;
 inset:0;
 opacity:.18;
+pointer-events:none;
+z-index:0;
 background-image:
 linear-gradient(rgba(255,0,0,.04) 1px, transparent 1px),
 linear-gradient(90deg, rgba(255,0,0,.04) 1px, transparent 1px);
@@ -403,10 +405,18 @@ background-size:82px 82px;
 .background-noise{
 position:fixed;
 inset:0;
+pointer-events:none;
+z-index:0;
 background:
 radial-gradient(circle at 8% 40%, rgba(255,0,0,.16) 0 2px, transparent 3px),
 radial-gradient(circle at 77% 86%, rgba(255,0,0,.18) 0 3px, transparent 4px);
 opacity:.7;
+}
+
+.page-shell,
+.page-content{
+position:relative;
+z-index:1;
 }
 
 @keyframes sweep{

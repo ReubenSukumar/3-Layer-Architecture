@@ -7,6 +7,7 @@ const selectedUserNameEl = document.getElementById("selectedUserName");
 const countdownContextEl = document.getElementById("countdownContext");
 const statusDetailEl = document.getElementById("statusDetail");
 const statusTimestampEl = document.getElementById("statusTimestamp");
+const userMessageEl = document.getElementById("userMessage");
 
 let users = [];
 let selectedUserId = null;
@@ -44,6 +45,33 @@ function formatDate(dateString) {
   });
 }
 
+function setUserMessage(message, type = "") {
+  userMessageEl.textContent = message;
+  userMessageEl.className = "user-message";
+
+  if (type) {
+    userMessageEl.classList.add(type);
+  }
+}
+
+function getErrorMessage(data, fallback) {
+  return data?.message || data?.error || fallback;
+}
+
+async function readResponseData(response) {
+  const text = await response.text();
+
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 function renderUserList() {
   if (!users.length) {
     userListEl.innerHTML = `
@@ -57,13 +85,31 @@ function renderUserList() {
   userListEl.innerHTML = users
     .map(
       (user) => `
-        <button type="button" class="user-card ${user.id === selectedUserId ? "active" : ""}" data-user-id="${user.id}">
-          <span class="user-card__name">${escapeHtml(user.name)}</span>
-          <span class="user-card__date">${escapeHtml(formatDate(user.excommunicadoAt))}</span>
-        </button>
+        <article class="user-card ${user.id === selectedUserId ? "active" : ""}">
+          <button type="button" class="user-card__select" data-user-id="${user.id}">
+            <span class="user-card__name">${escapeHtml(user.name)}</span>
+            <span class="user-card__date">${escapeHtml(formatDate(user.excommunicadoAt))}</span>
+          </button>
+          <div class="user-card__actions">
+            <button type="button" class="user-delete-btn" data-user-id="${user.id}">
+              Delete
+            </button>
+          </div>
+        </article>
       `
     )
     .join("");
+}
+
+async function deleteUser(userId) {
+  const response = await fetch(`/api/users/${userId}`, {
+    method: "DELETE"
+  });
+
+  if (!response.ok) {
+    const data = await readResponseData(response);
+    throw new Error(getErrorMessage(data, "Unable to delete user."));
+  }
 }
 
 function updateCountdown(user) {
@@ -117,11 +163,12 @@ async function loadUsers() {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error || "Unable to load users.");
+      throw new Error(getErrorMessage(data, "Unable to load users."));
     }
 
     users = data.users || [];
     renderUserList();
+    setUserMessage("");
 
     if (users.length) {
       selectUser(users[0].id);
@@ -137,6 +184,7 @@ async function loadUsers() {
     userListEl.innerHTML = `
       <div class="user-empty">${escapeHtml(error.message)}</div>
     `;
+    setUserMessage(error.message, "error");
     statusDetailEl.textContent = "Connection failed";
     statusTimestampEl.textContent = "API unavailable";
     setTimerDisplay(0, 0, 0, 0);
@@ -144,14 +192,49 @@ async function loadUsers() {
 }
 
 userListEl.addEventListener("click", (event) => {
-  const button = event.target.closest(".user-card");
+  const selectButton = event.target.closest(".user-card__select");
+  const deleteButton = event.target.closest(".user-delete-btn");
 
-  if (!button || !userListEl.contains(button)) {
+  if (deleteButton && userListEl.contains(deleteButton)) {
+    event.preventDefault();
+    const userId = Number(deleteButton.dataset.userId);
+    const user = users.find((entry) => entry.id === userId);
+    const userName = user?.name || "this user";
+
+    if (!Number.isFinite(userId)) {
+      setUserMessage("Invalid user selection.", "error");
+      return;
+    }
+
+    if (!window.confirm(`Delete ${userName} from the registry?`)) {
+      return;
+    }
+
+    deleteButton.disabled = true;
+    deleteButton.textContent = "Deleting...";
+    setUserMessage(`Removing ${userName} from the registry...`);
+
+    deleteUser(userId)
+      .then(async () => {
+        setUserMessage(`Deleted ${userName} from the registry.`, "success");
+        await loadUsers();
+      })
+      .catch((error) => {
+        setUserMessage(error.message, "error");
+      })
+      .finally(() => {
+        deleteButton.disabled = false;
+        deleteButton.textContent = "Delete";
+      });
+    return;
+  }
+
+  if (!selectButton || !userListEl.contains(selectButton)) {
     return;
   }
 
   event.preventDefault();
-  selectUser(Number(button.dataset.userId));
+  selectUser(Number(selectButton.dataset.userId));
 });
 
 loadUsers();

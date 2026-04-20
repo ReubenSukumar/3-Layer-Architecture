@@ -5,6 +5,7 @@ import com.jwplatform.registry.dto.UserEnvelopeResponse;
 import com.jwplatform.registry.dto.UserResponse;
 import com.jwplatform.registry.dto.UsersResponse;
 import com.jwplatform.registry.entity.User;
+import com.jwplatform.registry.exception.UserNotFoundException;
 import com.jwplatform.registry.mapper.UserMapper;
 import com.jwplatform.registry.repository.UserRepository;
 import java.util.List;
@@ -45,5 +46,14 @@ public class UserService {
         User savedUser = userRepository.save(user);
         log.info("Created registry user with id={} and name={}", savedUser.getId(), savedUser.getName());
         return new UserEnvelopeResponse(UserMapper.toResponse(savedUser));
+    }
+
+    @Transactional
+    public void deleteUser(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UserNotFoundException(id));
+
+        userRepository.delete(user);
+        log.info("Deleted registry user with id={} and name={}", user.getId(), user.getName());
     }
 }

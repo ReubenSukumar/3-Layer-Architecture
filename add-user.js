@@ -1,5 +1,6 @@
 const form = document.getElementById("userForm");
 const formMessage = document.getElementById("formMessage");
+const registryMessage = document.getElementById("registryMessage");
 const registryList = document.getElementById("registryList");
 
 function escapeHtml(value) {
@@ -35,6 +36,33 @@ function setMessage(message, type = "") {
   }
 }
 
+function setRegistryMessage(message, type = "") {
+  registryMessage.textContent = message;
+  registryMessage.className = "registry-message";
+
+  if (type) {
+    registryMessage.classList.add(type);
+  }
+}
+
+function getErrorMessage(data, fallback) {
+  return data?.message || data?.error || fallback;
+}
+
+async function readResponseData(response) {
+  const text = await response.text();
+
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 function renderUsers(users) {
   if (!users.length) {
     registryList.innerHTML = `
@@ -49,13 +77,31 @@ function renderUsers(users) {
     .map(
       (user) => `
         <article class="registry-card">
-          <h3>${escapeHtml(user.name)}</h3>
-          <p>Excommunicado: ${escapeHtml(formatDate(user.excommunicadoAt))}</p>
-          <p>Lat ${Number(user.latitude).toFixed(4)} | Lng ${Number(user.longitude).toFixed(4)}</p>
+          <div>
+            <h3>${escapeHtml(user.name)}</h3>
+            <p>Excommunicado: ${escapeHtml(formatDate(user.excommunicadoAt))}</p>
+            <p>Lat ${Number(user.latitude).toFixed(4)} | Lng ${Number(user.longitude).toFixed(4)}</p>
+          </div>
+          <div class="registry-card__actions">
+            <button type="button" class="delete-btn" data-user-id="${user.id}">
+              Delete
+            </button>
+          </div>
         </article>
       `
     )
     .join("");
+}
+
+async function deleteUser(userId) {
+  const response = await fetch(`/api/users/${userId}`, {
+    method: "DELETE"
+  });
+
+  if (!response.ok) {
+    const data = await readResponseData(response);
+    throw new Error(getErrorMessage(data, "Unable to delete user."));
+  }
 }
 
 async function loadUsers() {
@@ -64,9 +110,10 @@ async function loadUsers() {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error || "Unable to load users.");
+      throw new Error(getErrorMessage(data, "Unable to load users."));
     }
 
+    setRegistryMessage("");
     renderUsers(data.users || []);
   } catch (error) {
     registryList.innerHTML = `
@@ -74,6 +121,7 @@ async function loadUsers() {
         ${escapeHtml(error.message)}
       </div>
     `;
+    setRegistryMessage(error.message, "error");
   }
 }
 
@@ -101,7 +149,7 @@ form.addEventListener("submit", async (event) => {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error || "Unable to save user.");
+      throw new Error(getErrorMessage(data, "Unable to save user."));
     }
 
     form.reset();
@@ -109,6 +157,44 @@ form.addEventListener("submit", async (event) => {
     await loadUsers();
   } catch (error) {
     setMessage(error.message, "error");
+  }
+});
+
+registryList.addEventListener("click", async (event) => {
+  const deleteButton = event.target.closest(".delete-btn");
+
+  if (!deleteButton || !registryList.contains(deleteButton)) {
+    return;
+  }
+
+  const userId = Number(deleteButton.dataset.userId);
+  const userCard = deleteButton.closest(".registry-card");
+  const userName = userCard?.querySelector("h3")?.textContent?.trim() || "this user";
+
+  if (!Number.isFinite(userId)) {
+    setRegistryMessage("Invalid user selection.", "error");
+    return;
+  }
+
+  const confirmed = window.confirm(`Delete ${userName} from the registry?`);
+
+  if (!confirmed) {
+    return;
+  }
+
+  deleteButton.disabled = true;
+  deleteButton.textContent = "Deleting...";
+  setRegistryMessage(`Removing ${userName} from the registry...`);
+
+  try {
+    await deleteUser(userId);
+    setRegistryMessage(`Deleted ${userName} from the registry.`, "success");
+    await loadUsers();
+  } catch (error) {
+    setRegistryMessage(error.message, "error");
+  } finally {
+    deleteButton.disabled = false;
+    deleteButton.textContent = "Delete";
   }
 });
 

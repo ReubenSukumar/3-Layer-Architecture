@@ -1,4 +1,4 @@
-name: Deploy 3-Tier App (Bastion Multi-Instance)
+name: Deploy 3-Tier App
 
 on:
   workflow_dispatch:
@@ -11,7 +11,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     env:
       SERVER_PORT: "8080"
       JPA_DDL_AUTO: "update"
@@ -21,10 +20,10 @@ jobs:
       SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
       SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
       SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
-      DB_HOST: ${{ secrets.DB_HOST }}
-      DB_ADMIN_USER: ${{ secrets.DB_ADMIN_USER }}
-      DB_ADMIN_PASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
-      APP_DB_NAME: "jw_registry"
+      BASTION_HOST: ${{ secrets.BASTION_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      FRONTEND_HOSTS: ${{ secrets.FRONTEND_HOSTS }}
+      BACKEND_HOSTS: ${{ secrets.BACKEND_HOSTS }}
 
     steps:
       - name: Checkout selected branch
@@ -39,38 +38,34 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Build JAR
+      - name: Build backend JAR
         run: |
           cd backend
           mvn clean package -DskipTests
 
-      - name: Archive frontend
+      - name: Package frontend
         run: |
-          tar -czf frontend.tar.gz \
-            index.html add-user.html excommunicado.html location.html \
-            *.css *.js assets
+          tar -czf frontend.tar.gz index.html add-user.html excommunicado.html location.html *.css *.js assets
 
-      - name: Setup SSH
+      - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           printf "%s\n" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-
-          cat > ~/.ssh/config <<EOF
-          Host bastion
-            HostName ${{ secrets.BASTION_HOST }}
-            User ${{ secrets.EC2_USER }}
-            IdentityFile ~/.ssh/id_rsa
-            StrictHostKeyChecking no
-            UserKnownHostsFile=/dev/null
-
-          Host *
-            User ${{ secrets.EC2_USER }}
-            IdentityFile ~/.ssh/id_rsa
-            StrictHostKeyChecking no
-            UserKnownHostsFile=/dev/null
-          EOF
-
+          {
+            echo "Host bastion"
+            echo "  HostName ${BASTION_HOST}"
+            echo "  User ${EC2_USER}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile=/dev/null"
+            echo
+            echo "Host *"
+            echo "  User ${EC2_USER}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile=/dev/null"
+          } > ~/.ssh/config
           chmod 600 ~/.ssh/config
 
       - name: Verify JAR exists
@@ -78,97 +73,76 @@ jobs:
           ls -lh backend/target/
           test -f backend/target/app.jar
 
-      - name: Bootstrap MySQL database
+      - name: Validate datasource
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y mysql-client
+          case "${SPRING_DATASOURCE_URL}" in
+            jdbc:mysql://*) ;;
+            *)
+              echo "SPRING_DATASOURCE_URL must be a full JDBC URL"
+              exit 1
+              ;;
+          esac
 
-          mysql -h "$DB_HOST" -u "$DB_ADMIN_USER" -p"$DB_ADMIN_PASSWORD" <<SQL
-          CREATE DATABASE IF NOT EXISTS ${APP_DB_NAME}
-            CHARACTER SET utf8mb4
-            COLLATE utf8mb4_unicode_ci;
-
-          CREATE USER IF NOT EXISTS '${SPRING_DATASOURCE_USERNAME}'@'%' IDENTIFIED BY '${SPRING_DATASOURCE_PASSWORD}';
-          GRANT ALL PRIVILEGES ON ${APP_DB_NAME}.* TO '${SPRING_DATASOURCE_USERNAME}'@'%';
-          FLUSH PRIVILEGES;
-          SQL
-
-      - name: Deploy frontend to all instances
+      - name: Deploy frontend
+        shell: bash
         run: |
           set -euo pipefail
+          IFS=',' read -r -a HOSTS <<< "${FRONTEND_HOSTS}"
 
-          IFS=',' read -r -a FRONTEND_HOSTS <<< "${{ secrets.FRONTEND_HOSTS }}"
-
-          for HOST in "${FRONTEND_HOSTS[@]}"; do
+          for HOST in "${HOSTS[@]}"; do
             HOST="$(echo "$HOST" | xargs)"
+            [ -n "$HOST" ] || continue
             echo "Deploying frontend to $HOST"
 
-            scp -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+            scp -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
               frontend.tar.gz \
-              ${{ secrets.EC2_USER }}@"$HOST":/tmp/frontend.tar.gz
+              "${EC2_USER}@${HOST}:/tmp/frontend.tar.gz"
 
-            ssh -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
-              ${{ secrets.EC2_USER }}@"$HOST" \
-              "sudo mkdir -p /var/www/html && \
-               sudo find /var/www/html -mindepth 1 -maxdepth 1 -exec rm -rf {} + && \
-               sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html && \
-               sudo systemctl restart nginx"
+            ssh -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
+              "${EC2_USER}@${HOST}" \
+              "sudo mkdir -p /var/www/html && sudo find /var/www/html -mindepth 1 -maxdepth 1 -exec rm -rf {} + && sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html && sudo systemctl restart nginx"
           done
 
-      - name: Deploy backend to all instances
+      - name: Deploy backend
+        shell: bash
         run: |
           set -euo pipefail
-
           JAR_FILE="$(ls backend/target/*.jar | head -n 1)"
-          IFS=',' read -r -a BACKEND_HOSTS <<< "${{ secrets.BACKEND_HOSTS }}"
+          IFS=',' read -r -a HOSTS <<< "${BACKEND_HOSTS}"
 
-          for HOST in "${BACKEND_HOSTS[@]}"; do
+          for HOST in "${HOSTS[@]}"; do
             HOST="$(echo "$HOST" | xargs)"
+            [ -n "$HOST" ] || continue
             echo "Deploying backend to $HOST"
 
             cat > /tmp/jw-registry.env <<EOF
-            SERVER_PORT=8080
-            SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
-            SPRING_DATASOURCE_USERNAME=${SPRING_DATASOURCE_USERNAME}
-            SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD}
-            JPA_DDL_AUTO=${JPA_DDL_AUTO}
-            APP_CORS_ALLOWED_ORIGINS=${APP_CORS_ALLOWED_ORIGINS}
-            DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
-            DB_MIN_IDLE=${DB_MIN_IDLE}
-            EOF
+SERVER_PORT=${SERVER_PORT}
+SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
+SPRING_DATASOURCE_USERNAME=${SPRING_DATASOURCE_USERNAME}
+SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD}
+JPA_DDL_AUTO=${JPA_DDL_AUTO}
+APP_CORS_ALLOWED_ORIGINS=${APP_CORS_ALLOWED_ORIGINS}
+DB_MAX_POOL_SIZE=${DB_MAX_POOL_SIZE}
+DB_MIN_IDLE=${DB_MIN_IDLE}
+EOF
 
-            scp -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+            scp -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
               "$JAR_FILE" \
-              ${{ secrets.EC2_USER }}@"$HOST":/tmp/app.jar
+              "${EC2_USER}@${HOST}:/tmp/app.jar"
 
-            scp -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
+            scp -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
               /tmp/jw-registry.env \
-              ${{ secrets.EC2_USER }}@"$HOST":/tmp/jw-registry.env
+              "${EC2_USER}@${HOST}:/tmp/jw-registry.env"
 
-            ssh -o ProxyJump=${{ secrets.EC2_USER }}@${{ secrets.BASTION_HOST }} \
-              ${{ secrets.EC2_USER }}@"$HOST" \
-              "set -e; \
-               sudo apt-get update; \
-               sudo apt-get install -y openjdk-21-jre-headless; \
-               sudo mkdir -p /opt/jw-registry /etc/jw-registry; \
-               sudo mv /tmp/app.jar /opt/jw-registry/app.jar; \
-               sudo mv /tmp/jw-registry.env /etc/jw-registry/jw-registry.env; \
-               sudo chown -R ubuntu:ubuntu /opt/jw-registry; \
-               sudo chown root:root /etc/jw-registry/jw-registry.env; \
-               sudo chmod 600 /etc/jw-registry/jw-registry.env; \
-               sudo systemctl daemon-reload; \
-               sudo systemctl enable jw-registry; \
-               sudo systemctl restart jw-registry; \
-               for i in \$(seq 1 20); do \
-                 if systemctl is-active --quiet jw-registry; then break; fi; \
-                 sleep 3; \
-               done; \
-               sudo systemctl is-active --quiet jw-registry; \
-               for i in \$(seq 1 20); do \
-                 if curl -fsS http://localhost:8080/health; then exit 0; fi; \
-                 sleep 3; \
-               done; \
-               sudo journalctl -u jw-registry --no-pager -n 100; \
-               exit 1"
+            ssh -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
+              "${EC2_USER}@${HOST}" \
+              "set -e; sudo apt-get update; sudo apt-get install -y openjdk-21-jre-headless; sudo mkdir -p /opt/jw-registry /etc/jw-registry; sudo mv /tmp/app.jar /opt/jw-registry/app.jar; sudo mv /tmp/jw-registry.env /etc/jw-registry/jw-registry.env; sudo chown -R ubuntu:ubuntu /opt/jw-registry; sudo chown root:root /etc/jw-registry/jw-registry.env; sudo chmod 600 /etc/jw-registry/jw-registry.env; sudo systemctl daemon-reload; sudo systemctl enable jw-registry; sudo systemctl restart jw-registry; for i in \$(seq 1 20); do if systemctl is-active --quiet jw-registry; then break; fi; sleep 3; done; sudo systemctl is-active --quiet jw-registry; for i in \$(seq 1 20); do if curl -fsS http://localhost:8080/health; then exit 0; fi; sleep 3; done; sudo journalctl -u jw-registry --no-pager -n 100; exit 1"
           done
+
+
+
+
+
+
+          

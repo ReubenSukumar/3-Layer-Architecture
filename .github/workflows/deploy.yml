@@ -1,4 +1,4 @@
-name: Deploy 3-Tier App (Optimized)
+name: Deploy 3-Tier App
 
 on:
   workflow_dispatch:
@@ -11,127 +11,143 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     env:
       SERVER_PORT: "8080"
       JPA_DDL_AUTO: "update"
       DB_MAX_POOL_SIZE: "10"
       DB_MIN_IDLE: "2"
-
       APP_CORS_ALLOWED_ORIGINS: ${{ secrets.APP_CORS_ALLOWED_ORIGINS }}
       PRIVATE_ALB_DNS: ${{ secrets.PRIVATE_ALB_DNS }}
-
       SPRING_DATASOURCE_URL: ${{ secrets.SPRING_DATASOURCE_URL }}
       SPRING_DATASOURCE_USERNAME: ${{ secrets.SPRING_DATASOURCE_USERNAME }}
       SPRING_DATASOURCE_PASSWORD: ${{ secrets.SPRING_DATASOURCE_PASSWORD }}
-
       BASTION_HOST: ${{ secrets.BASTION_HOST }}
       EC2_USER: ${{ secrets.EC2_USER }}
       FRONTEND_HOSTS: ${{ secrets.FRONTEND_HOSTS }}
       BACKEND_HOSTS: ${{ secrets.BACKEND_HOSTS }}
 
     steps:
-      # ------------------------
-      # Checkout
-      # ------------------------
-      - name: Checkout
+      - name: Checkout selected branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.branch }}
 
-      # ------------------------
-      # Build Backend
-      # ------------------------
-      - name: Build backend
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build backend JAR
         run: |
           cd backend
           mvn clean package -DskipTests
 
-      # ------------------------
-      # Package Frontend
-      # ------------------------
       - name: Package frontend
         run: |
           tar -czf frontend.tar.gz index.html add-user.html excommunicado.html location.html *.css *.js assets
 
-      # ------------------------
-      # Configure SSH
-      # ------------------------
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           printf "%s\n" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-
-          cat <<EOF > ~/.ssh/config
-          Host *
-            User ${EC2_USER}
-            IdentityFile ~/.ssh/id_rsa
-            StrictHostKeyChecking no
-            UserKnownHostsFile=/dev/null
-          EOF
-
+          {
+            echo "Host bastion"
+            echo "  HostName ${BASTION_HOST}"
+            echo "  User ${EC2_USER}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile=/dev/null"
+            echo
+            echo "Host *"
+            echo "  User ${EC2_USER}"
+            echo "  IdentityFile ~/.ssh/id_rsa"
+            echo "  StrictHostKeyChecking no"
+            echo "  UserKnownHostsFile=/dev/null"
+          } > ~/.ssh/config
           chmod 600 ~/.ssh/config
 
-      # ------------------------
-      # Validate Config
-      # ------------------------
-      - name: Validate config
+      - name: Verify JAR exists
+        run: |
+          ls -lh backend/target/
+          test -f backend/target/app.jar
+
+      - name: Validate datasource
         run: |
           set -euo pipefail
+          case "${SPRING_DATASOURCE_URL}" in
+            jdbc:mysql://*) ;;
+            *)
+              echo "SPRING_DATASOURCE_URL must be a full JDBC URL"
+              exit 1
+              ;;
+          esac
 
-          [[ "${SPRING_DATASOURCE_URL}" == jdbc:mysql://* ]] || { echo "Invalid DB URL"; exit 1; }
-          [ -n "${PRIVATE_ALB_DNS}" ] || { echo "PRIVATE_ALB_DNS required"; exit 1; }
+      - name: Validate proxy target
+        run: |
+          set -euo pipefail
+          if [ -z "${PRIVATE_ALB_DNS}" ]; then
+            echo "PRIVATE_ALB_DNS secret is required"
+            exit 1
+          fi
 
-      # ------------------------
-      # Deploy Frontend + Smoke Test
-      # ------------------------
       - name: Deploy frontend
         shell: bash
         run: |
           set -euo pipefail
-
-          SSH_OPTS="-o ProxyJump=${EC2_USER}@${BASTION_HOST}"
-
           sed "s|<PRIVATE_ALB_DNS>|${PRIVATE_ALB_DNS}|g" deploy/nginx/jw-frontend.conf > /tmp/jw-frontend.conf
-
           IFS=',' read -r -a HOSTS <<< "${FRONTEND_HOSTS}"
 
           for HOST in "${HOSTS[@]}"; do
             HOST="$(echo "$HOST" | xargs)"
             [ -n "$HOST" ] || continue
-
             echo "Deploying frontend to $HOST"
 
-            scp $SSH_OPTS frontend.tar.gz "${EC2_USER}@${HOST}:/tmp/"
-            scp $SSH_OPTS /tmp/jw-frontend.conf "${EC2_USER}@${HOST}:/tmp/"
+            scp -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
+              frontend.tar.gz \
+              "${EC2_USER}@${HOST}:/tmp/frontend.tar.gz"
 
-            ssh $SSH_OPTS "${EC2_USER}@${HOST}" "
-              set -e
-              sudo mkdir -p /var/www/html /etc/nginx/conf.d
-              sudo find /var/www/html -mindepth 1 -exec rm -rf {} +
-              sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html
-              sudo mv /tmp/jw-frontend.conf /etc/nginx/conf.d/jw-frontend.conf
-              sudo nginx -t
-              sudo systemctl is-active --quiet nginx && sudo systemctl reload nginx || sudo systemctl start nginx
+            scp -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
+              /tmp/jw-frontend.conf \
+              "${EC2_USER}@${HOST}:/tmp/jw-frontend.conf"
 
-              # Smoke test
-              curl -fsS http://localhost/api/users > /dev/null
-            "
+            ssh -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
+              "${EC2_USER}@${HOST}" \
+              "set -e; sudo mkdir -p /var/www/html /etc/nginx/conf.d; sudo find /var/www/html -mindepth 1 -maxdepth 1 -exec rm -rf {} +; sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/html; sudo mv /tmp/jw-frontend.conf /etc/nginx/conf.d/jw-frontend.conf; sudo nginx -t && (sudo systemctl is-active --quiet nginx \ && sudo systemctl reload nginx \ || sudo systemctl start nginx)"  
           done
 
-      # ------------------------
-      # Deploy Backend
-      # ------------------------
+      - name: Smoke test frontend proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a HOSTS <<< "${FRONTEND_HOSTS}"
+
+          for HOST in "${HOSTS[@]}"; do
+            HOST="$(echo "$HOST" | xargs)"
+            [ -n "$HOST" ] || continue
+            echo "Checking API proxy on $HOST"
+
+            ssh -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
+              "${EC2_USER}@${HOST}" \
+              "set -e; curl -fsS http://localhost/api/users >/tmp/api-users.json; test -s /tmp/api-users.json"
+          done
+
+
       - name: Deploy backend
         shell: bash
         run: |
           set -euo pipefail
-
-          SSH_OPTS="-o ProxyJump=${EC2_USER}@${BASTION_HOST}"
           JAR_FILE="$(ls backend/target/*.jar | head -n 1)"
+          IFS=',' read -r -a HOSTS <<< "${BACKEND_HOSTS}"
 
-          cat > /tmp/jw-registry.env <<EOF
+          for HOST in "${HOSTS[@]}"; do
+            HOST="$(echo "$HOST" | xargs)"
+            [ -n "$HOST" ] || continue
+            echo "Deploying backend to $HOST"
+
+            cat > /tmp/jw-registry.env <<EOF
           SERVER_PORT=${SERVER_PORT}
           SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
           SPRING_DATASOURCE_USERNAME=${SPRING_DATASOURCE_USERNAME}
@@ -142,54 +158,19 @@ jobs:
           DB_MIN_IDLE=${DB_MIN_IDLE}
           EOF
 
-          IFS=',' read -r -a HOSTS <<< "${BACKEND_HOSTS}"
-
-          for HOST in "${HOSTS[@]}"; do
-            HOST="$(echo "$HOST" | xargs)"
-            [ -n "$HOST" ] || continue
-
-            echo "Deploying backend to $HOST"
-
-            scp $SSH_OPTS \
+            scp -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
               "$JAR_FILE" \
+              "${EC2_USER}@${HOST}:/tmp/app.jar"
+
+            scp -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
               /tmp/jw-registry.env \
+              "${EC2_USER}@${HOST}:/tmp/jw-registry.env"
+
+            scp -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
               deploy/systemd/jw-registry.service \
-              "${EC2_USER}@${HOST}:/tmp/"
+              "${EC2_USER}@${HOST}:/tmp/jw-registry.service"
 
-            ssh $SSH_OPTS "${EC2_USER}@${HOST}" "
-              set -e
-
-              command -v java >/dev/null || sudo apt-get update && sudo apt-get install -y openjdk-21-jre-headless
-
-              sudo mkdir -p /opt/jw-registry /etc/jw-registry
-
-              sudo mv /tmp/app.jar /opt/jw-registry/app.jar
-              sudo mv /tmp/jw-registry.env /etc/jw-registry/jw-registry.env
-              sudo mv /tmp/jw-registry.service /etc/systemd/system/jw-registry.service
-
-              sudo chown -R ubuntu:ubuntu /opt/jw-registry
-              sudo chmod 600 /etc/jw-registry/jw-registry.env
-              sudo chmod 644 /etc/systemd/system/jw-registry.service
-
-              sudo systemctl daemon-reload
-              sudo systemctl enable jw-registry
-              sudo systemctl restart jw-registry
-
-              # Wait for service
-              for i in \$(seq 1 20); do
-                systemctl is-active --quiet jw-registry && break
-                sleep 3
-              done
-
-              systemctl is-active --quiet jw-registry
-
-              # Health check
-              for i in \$(seq 1 20); do
-                curl -fsS http://localhost:8080/health && exit 0
-                sleep 3
-              done
-
-              sudo journalctl -u jw-registry --no-pager -n 100
-              exit 1
-            "
+            ssh -o ProxyJump="${EC2_USER}@${BASTION_HOST}" \
+              "${EC2_USER}@${HOST}" \
+              "set -e; sudo apt-get -o DPkg::Lock::Timeout=120 update; sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y openjdk-21-jre-headless; sudo mkdir -p /opt/jw-registry /etc/jw-registry /etc/systemd/system; sudo mv /tmp/app.jar /opt/jw-registry/app.jar; sudo mv /tmp/jw-registry.env /etc/jw-registry/jw-registry.env; sudo mv /tmp/jw-registry.service /etc/systemd/system/jw-registry.service; sudo chown -R ubuntu:ubuntu /opt/jw-registry; sudo chown root:root /etc/jw-registry/jw-registry.env /etc/systemd/system/jw-registry.service; sudo chmod 600 /etc/jw-registry/jw-registry.env; sudo chmod 644 /etc/systemd/system/jw-registry.service; sudo systemctl daemon-reload; sudo systemctl enable jw-registry; sudo systemctl restart jw-registry; for i in \$(seq 1 20); do if systemctl is-active --quiet jw-registry; then break; fi; sleep 3; done; sudo systemctl is-active --quiet jw-registry; for i in \$(seq 1 20); do if curl -fsS http://localhost:8080/health; then exit 0; fi; sleep 3; done; sudo journalctl -u jw-registry --no-pager -n 100; exit 1"
           done

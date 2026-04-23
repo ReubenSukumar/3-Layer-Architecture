@@ -106,3 +106,83 @@ JW Platform
 │
 └── .vscode
     └── settings.json
+```
+
+## 🌐 Frontend  
+
+The frontend is a static web application built using:
+
+HTML for structure
+CSS for styling
+JavaScript for interactivity
+
+### Features
+User creation interface (add-user)
+Data visualization (high-table)
+Location-based functionality (location)
+Status/timer-based UI (excommunicado)
+Shared assets and styling
+
+The frontend is modular, with each feature organized into its own directory.
+
+⚙️ Backend
+
+The backend is a Spring Boot application that exposes REST APIs.
+
+Architecture
+Controller Layer → Handles HTTP requests
+Service Layer → Business logic
+Repository Layer → Data access
+DTO Layer → Request/response abstraction
+Key Components
+UserController → User-related APIs
+HealthController → Health check endpoint
+UserService → Core business logic
+UserRepository → Data persistence
+User → Entity model
+UserMapper → DTO ↔ Entity mapping
+GlobalExceptionHandler → Centralized error handling
+Configuration
+application.properties for runtime configuration
+Maven (pom.xml) for build and dependency management
+🛠️ Deployment
+
+The project includes deployment-ready configurations:
+
+MySQL
+bootstrap.sql initializes the database schema
+NGINX
+jw-frontend.conf for serving frontend and routing traffic
+Systemd
+jw-registry.service to run the backend as a service
+jw-registry.env.example for environment variable configuration
+Documentation
+DEPLOYMENT.md contains additional setup instructions
+🚀 How to Run
+Backend
+cd backend
+mvn clean package
+java -jar target/*.jar
+Frontend
+Open index.html in a browser
+or
+Serve via NGINX using provided configuration
+📦 Build & Dependencies
+Backend uses Maven
+Java-based application (Spring Boot)
+Static frontend (no build step required)
+🧰 Development Setup
+.vscode/settings.json included for editor configuration
+Suitable for local development and testing
+📌 Notes
+The repository includes compiled backend artifacts (target/)
+Designed with modular separation of concerns
+Includes both application code and deployment configuration for a full-stack setup
+🎯 Purpose
+
+This project demonstrates:
+
+Full-stack application structure
+Backend API design with Spring Boot
+Static frontend integration
+Deployment configuration using system tools (NGINX, systemd, MySQL)

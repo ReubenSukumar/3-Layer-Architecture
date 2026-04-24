@@ -1,16 +1,16 @@
-# JW Platform
+# JW Platform  
 
-A full-stack web application built with a static frontend and a Java Spring Boot backend, along with deployment configurations for running the system in a production-like environment.
+A full-stack web application built with a static frontend and a Java Spring Boot backend, along with deployment configurations for running the system in a production-like environment.  
 
 ---
 
-## 📌 Overview
+## 📌 Overview  
 
-JW Platform is designed as a modular application with:
-
-- A **static frontend** for user interaction
-- A **RESTful backend service** for handling business logic
-- Supporting **deployment configurations** (NGINX, MySQL, systemd)
+JW Platform is designed as a modular application with:  
+  
+- A **static frontend** for user interaction  
+- A **RESTful backend service** for handling business logic  
+- Supporting **deployment configurations** (NGINX, MySQL, systemd)  
 
 The project demonstrates structured application development along with system-level deployment setup.
 
@@ -107,82 +107,167 @@ JW Platform
 └── .vscode
     └── settings.json
 ```
+---
 
-## 🌐 Frontend  
+## 🌐 Frontend   
 
-The frontend is a static web application built using:
+The frontend is a static web application built using:  
 
-HTML for structure
-CSS for styling
-JavaScript for interactivity
+▪ **HTML** for structure  
+▪ **CSS** for styling  
+▪ **JavaScript** for interactivity  
 
-### Features
-User creation interface (add-user)
-Data visualization (high-table)
-Location-based functionality (location)
-Status/timer-based UI (excommunicado)
-Shared assets and styling
 
-The frontend is modular, with each feature organized into its own directory.
 
-⚙️ Backend
+### Features  
+  
+▪ User creation interface (add-user)  
+▪ Data visualization (high-table)  
+▪ Location-based functionality (location)  
+▪ Status/timer-based UI (excommunicado)  
+▪ Shared assets and styling  
 
-The backend is a Spring Boot application that exposes REST APIs.
+The frontend is modular, with each feature organized into its own directory.  
 
-Architecture
-Controller Layer → Handles HTTP requests
-Service Layer → Business logic
-Repository Layer → Data access
-DTO Layer → Request/response abstraction
-Key Components
-UserController → User-related APIs
-HealthController → Health check endpoint
-UserService → Core business logic
-UserRepository → Data persistence
-User → Entity model
-UserMapper → DTO ↔ Entity mapping
+## ⚙️ Backend
+
+The backend is a **Spring Boot application** that exposes REST APIs.
+
+### Architecture  
+```text
+Controller Layer  → Handles HTTP requests
+Service Layer     → Business logic
+Repository Layer  → Data access
+DTO Layer         → Request/response abstraction
+```
+### Key Components  
+```text
+UserController         → User-related APIs
+HealthController       → Health check endpoint
+UserService            → Core business logic
+UserRepository         → Data persistence
+User                   → Entity model
+UserMapper             → DTO ↔ Entity mapping
 GlobalExceptionHandler → Centralized error handling
-Configuration
-application.properties for runtime configuration
-Maven (pom.xml) for build and dependency management
-🛠️ Deployment
+```
 
-The project includes deployment-ready configurations:
+### Configuration  
+▪ application.properties for runtime configuration  
+▪ Maven (pom.xml) for build and dependency management  
 
-MySQL
-bootstrap.sql initializes the database schema
-NGINX
-jw-frontend.conf for serving frontend and routing traffic
-Systemd
-jw-registry.service to run the backend as a service
-jw-registry.env.example for environment variable configuration
-Documentation
-DEPLOYMENT.md contains additional setup instructions
-🚀 How to Run
-Backend
+---
+
+## 🛠️ Deployment
+
+The project includes deployment-ready configurations:  
+
+### MySQL
+
+▪ bootstrap.sql initializes the database schema  
+
+### NGINX
+
+▪ jw-frontend.conf for serving frontend and routing traffic  
+
+### Systemd
+
+▪ jw-registry.service to run the backend as a service
+▪ jw-registry.env.example for environment variable configuration
+
+### Documentation
+
+▪ ```textDEPLOYMENT.md``` contains additional setup instructions
+
+---
+
+## 🔄 CI/CD Pipeline  
+
+The project follows a pipeline-driven deployment approach combining build, provisioning, and configuration.  
+
+### Pipeline Flow   
+
+#### 1.Source Checkout  
+   ▪ Fetches the selected branch from version control 
+
+##### 2.Build Stage  
+   ▪ Backend is built using Maven  
+   ▪ Generates executable .jar artifact  
+
+#### 3.Infrastructure Provisioning  
+   ▪ Terraform is used to provision:  
+     ▪ Network resources  
+     ▪ Compute instances  
+     ▪ Security configurations  
+     ▪ Load balancing (if configured)  
+
+#### 4.Instance Configuration  
+   ▪ Shell scripts configure:  
+     MySQL setup  
+     NGINX installation and configuration  
+     Runtime dependencies  
+
+#### 5.Application Deployment  
+   ▪ Backend runs via systemd  
+   ▪ Frontend served through NGINX  
+
+### Pipeline Components  
+```text
+Terraform      → Infrastructure provisioning  
+Shell Scripts  → Instance bootstrap and setup  
+Maven          → Backend build  
+Systemd        → Service management  
+```
+
+---
+
+
+## 🚀 How to Run  
+
+### Backend  
+
+```text
 cd backend
 mvn clean package
 java -jar target/*.jar
-Frontend
-Open index.html in a browser
-or
-Serve via NGINX using provided configuration
-📦 Build & Dependencies
-Backend uses Maven
-Java-based application (Spring Boot)
-Static frontend (no build step required)
-🧰 Development Setup
-.vscode/settings.json included for editor configuration
-Suitable for local development and testing
-📌 Notes
-The repository includes compiled backend artifacts (target/)
-Designed with modular separation of concerns
-Includes both application code and deployment configuration for a full-stack setup
-🎯 Purpose
+```
+### Frontend  
+▪ Open index.html in a browser  
+**or**  
+▪ Serve via NGINX using provided configuration  
 
-This project demonstrates:
+---
 
-Full-stack application structure
-Backend API design with Spring Boot
-Static frontend integration
-Deployment configuration using system tools (NGINX, systemd, MySQL)
+## 📦 Build & Dependencies  
+▪ Backend uses Maven  
+▪ Java-based application (Spring Boot)  
+▪ Static frontend (no build step required)  
+
+---
+
+## 🧰 Development Setup  
+▪ .vscode/settings.json included for editor configuration  
+▪ Suitable for local development and testing  
+
+---
+
+## 📌 Notes  
+▪ The repository includes compiled backend artifacts (target/)  
+▪ Designed with modular separation of concerns  
+▪ Includes both application code and deployment configuration for a full-stack setup  
+
+---
+
+## 🎯 Purpose
+
+This project demonstrates:  
+
+▪ Full-stack application structure
+▪ Backend API design with Spring Boot
+▪ Static frontend integration
+▪ Deployment configuration using system tools (NGINX, systemd, MySQL)
+
+
+## 👨‍💻 Author    
+  
+**Reuben Sukumar R**  
+**Cloud / DevOps Engineer**  

@@ -163,16 +163,16 @@ The project includes deployment-ready configurations:
 
 ### MySQL
 
-▪ bootstrap.sql initializes the database schema  
+▪ ```textbootstrap.sql initializes``` the database schema  
 
 ### NGINX
 
-▪ jw-frontend.conf for serving frontend and routing traffic  
+▪ ```textjw-frontend.conf``` for serving frontend and routing traffic    
 
 ### Systemd
 
-▪ jw-registry.service to run the backend as a service
-▪ jw-registry.env.example for environment variable configuration
+▪ ```textjw-registry.service``` to run the backend as a service  
+▪ ```textjw-registry.env.example``` for environment variable configuration  
 
 ### Documentation
 
@@ -200,11 +200,11 @@ The project follows a pipeline-driven deployment approach combining build, provi
      ▪ Security configurations  
      ▪ Load balancing (if configured)  
 
-#### 4.Instance Configuration  
-   ▪ Shell scripts configure:  
-     MySQL setup  
-     NGINX installation and configuration  
-     Runtime dependencies  
+   #### 4.Instance Configuration  
+      ▪ Shell scripts configure:  
+         MySQL setup  
+        NGINX installation and configuration  
+        Runtime dependencies  
 
 #### 5.Application Deployment  
    ▪ Backend runs via systemd  
@@ -261,10 +261,10 @@ java -jar target/*.jar
 
 This project demonstrates:  
 
-▪ Full-stack application structure
-▪ Backend API design with Spring Boot
-▪ Static frontend integration
-▪ Deployment configuration using system tools (NGINX, systemd, MySQL)
+▪ Full-stack application structure  
+▪ Backend API design with Spring Boot  
+▪ Static frontend integration  
+▪ Deployment configuration using system tools (NGINX, systemd, MySQL)  
 
 
 ## 👨‍💻 Author    

@@ -189,7 +189,7 @@ The project follows a pipeline-driven deployment approach combining build, provi
 #### 1.Source Checkout  
    ▪ Fetches the selected branch from version control 
 
-##### 2.Build Stage  
+#### 2.Build Stage  
    ▪ Backend is built using Maven  
    ▪ Generates executable .jar artifact  
 

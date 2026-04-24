@@ -200,11 +200,11 @@ The project follows a pipeline-driven deployment approach combining build, provi
      ▪ Security configurations  
      ▪ Load balancing (if configured)  
 
-   #### 4.Instance Configuration  
-      ▪ Shell scripts configure:  
-         MySQL setup  
-        NGINX installation and configuration  
-        Runtime dependencies  
+#### 4.Instance Configuration  
+   ▪ Shell scripts configure:  
+     MySQL setup  
+     NGINX installation and configuration  
+     Runtime dependencies  
 
 #### 5.Application Deployment  
    ▪ Backend runs via systemd  
